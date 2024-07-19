@@ -18,7 +18,7 @@ const Game = () => {
   const [currentRound, setCurrentRound] = useState(gameData.currentRound || 1);
   const [timeLeft, setTimeLeft] = useState(gameData.timeLeft || gameData.timePerSong || 30);
   const [guess, setGuess] = useState('');
-  const [members, setMembers] = useState([]);
+  const [members, setMembers] = useState([]);  // Initialize as an empty array
   const [songLink, setSongLink] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [allSongs, setAllSongs] = useState([]);
@@ -28,17 +28,18 @@ const Game = () => {
       const unsubscribe = onSnapshot(doc(firestore, 'games', lobbyId), snapshot => {
         const data = snapshot.data();
         if (data) {
-          console.log('Game data fetched:', data);
           dispatch(setGameData(data));
           setCurrentRound(data.currentRound || 1);
           setTimeLeft(data.timeLeft || data.timePerSong || 30);
           setSongLink(data.songs && data.songs[data.currentSongIndex] ? data.songs[data.currentSongIndex].link : '');
-          console.log('Scores before dispatch:', data.scores);
           dispatch(setScores(data.scores || []));
 
           // Update members with new scores
           setMembers(prevMembers => {
-            return prevMembers.map(member => {
+            if (!data.members) {
+              return prevMembers;
+            }
+            return data.members.map(member => {
               const score = data.scores.find(s => s.playerId === member.uid);
               if (score) {
                 return { ...member, points: score.points };
@@ -114,25 +115,43 @@ const Game = () => {
   const handleRoundEnd = async () => {
     try {
       console.log("Fetching the correct answer...");
-
+  
       const songDoc = await getDoc(doc(firestore, 'songs', gameData.songs[gameData.currentSongIndex].id));
       const correctAnswer = songDoc.data().gameName;
-
+  
       console.log("Correct answer fetched:", correctAnswer);
       console.log("User's guess:", guess);
-
+  
       if (guess.toLowerCase() === correctAnswer.toLowerCase()) {
         console.log("Correct guess, updating score...");
         await updateScore(lobbyId, user.uid, 1);
       }
-
+  
+      // Fetch updated game data after score update
+      const gameDoc = await getDoc(doc(firestore, 'games', lobbyId));
+      const updatedGameData = gameDoc.data();
+      const updatedScores = updatedGameData.scores || [];
+  
+      // Update members with new scores
+      const updatedMembers = members.map(member => {
+        const score = updatedScores.find(s => s.playerId === member.uid);
+        if (score) {
+          return { ...member, points: score.points };
+        }
+        return member;
+      });
+  
+      console.log("Updated members with new scores:", updatedMembers);
+      await updateDoc(doc(firestore, 'lobbies', lobbyId), { members: updatedMembers });
+      setMembers(updatedMembers);
+  
       if (currentRound < gameData.numRounds && gameData.currentSongIndex + 1 < gameData.songs.length) {
         const newRound = currentRound + 1;
         const newSongIndex = gameData.currentSongIndex + 1;
-
+  
         // 5-second break
         await new Promise(resolve => setTimeout(resolve, 5000));
-
+  
         await updateDoc(doc(firestore, 'games', lobbyId), {
           currentRound: newRound,
           timeLeft: gameData.timePerSong,
@@ -150,7 +169,7 @@ const Game = () => {
       console.error("Error ending round or updating scores:", error);
     }
   };
-
+  
   const addCurrentUserToMembers = async () => {
     const userRef = doc(firestore, 'users', user.uid);
     const userSnap = await getDoc(userRef);
@@ -213,11 +232,10 @@ const Game = () => {
 
       <h2>Members</h2>
       <ul>
-        {members.map(member => (
+        {Array.isArray(members) && members.map(member => (
           <li key={member.uid}>{member.username}: {member.points || 0}</li>
         ))}
       </ul>
-      
     </div>
   );
 };
