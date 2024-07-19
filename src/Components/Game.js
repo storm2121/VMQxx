@@ -28,11 +28,24 @@ const Game = () => {
       const unsubscribe = onSnapshot(doc(firestore, 'games', lobbyId), snapshot => {
         const data = snapshot.data();
         if (data) {
+          console.log('Game data fetched:', data);
           dispatch(setGameData(data));
           setCurrentRound(data.currentRound || 1);
           setTimeLeft(data.timeLeft || data.timePerSong || 30);
           setSongLink(data.songs && data.songs[data.currentSongIndex] ? data.songs[data.currentSongIndex].link : '');
-          dispatch(setScores(data.scores || []));  // Update the scores
+          console.log('Scores before dispatch:', data.scores);
+          dispatch(setScores(data.scores || []));
+
+          // Update members with new scores
+          setMembers(prevMembers => {
+            return prevMembers.map(member => {
+              const score = data.scores.find(s => s.playerId === member.uid);
+              if (score) {
+                return { ...member, points: score.points };
+              }
+              return member;
+            });
+          });
         }
       });
 
@@ -204,6 +217,7 @@ const Game = () => {
           <li key={member.uid}>{member.username}: {member.points || 0}</li>
         ))}
       </ul>
+      
     </div>
   );
 };
