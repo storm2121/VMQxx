@@ -30,6 +30,7 @@ const Lobby = () => {
         const lobbyRef = await addDoc(collection(firestore, 'lobbies'), {
           name: lobbyName,
           createdBy: auth.currentUser.uid,
+          gameStarted: false,
           members: arrayUnion({
             uid: auth.currentUser.uid,
             username: userData.username,

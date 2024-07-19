@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { doc, onSnapshot, updateDoc, setDoc, arrayUnion, getDoc, collection, getDocs } from 'firebase/firestore';
-import { firestore, auth } from '../firebase';
+import { doc, onSnapshot, updateDoc, setDoc, getDoc, collection, getDocs } from 'firebase/firestore';
+import { firestore } from '../firebase';
 import { useDispatch, useSelector } from 'react-redux';
 import { setGameData, setScores } from '../redux/gameSlice';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -44,6 +44,7 @@ const Game = () => {
       const unsubscribe = onSnapshot(doc(firestore, 'lobbies', lobbyId), snapshot => {
         const data = snapshot.data();
         if (data) {
+          console.log("Fetched members from lobby:", data.members);
           setMembers(data.members || []);
         }
       });
@@ -98,99 +99,106 @@ const Game = () => {
 
   const handleRoundEnd = async () => {
     try {
-        console.log("Fetching the correct answer...");
+      console.log("Fetching the correct answer...");
 
-        const songDoc = await getDoc(doc(firestore, 'songs', gameData.songs[gameData.currentSongIndex].id));
-        const correctAnswer = songDoc.data().gameName;
-        
-        console.log("Correct answer fetched:", correctAnswer);
-        console.log("User's guess:", guess);
+      const songDoc = await getDoc(doc(firestore, 'songs', gameData.songs[gameData.currentSongIndex].id));
+      const correctAnswer = songDoc.data().gameName;
 
-        // Check if the guess is correct and update the scores
-        let scoreUpdated = false;
-        const updatedScores = scores.map(score => {
-            if (score.playerId === user.uid && guess.toLowerCase() === correctAnswer.toLowerCase()) {
-                scoreUpdated = true;
-                return { ...score, points: (score.points || 0) + 1 };
-            }
-            return score;
+      console.log("Correct answer fetched:", correctAnswer);
+      console.log("User's guess:", guess);
+
+      let updatedScores = [...scores];
+      let userScoreUpdated = false;
+
+      // Check if the user's guess is correct and update the user's score
+      if (guess.toLowerCase() === correctAnswer.toLowerCase()) {
+        updatedScores = updatedScores.map(score => {
+          if (score.playerId === user.uid) {
+            userScoreUpdated = true;
+            return { ...score, points: (score.points || 0) + 1 };
+          }
+          return score;
         });
 
-        // If the user is not in the scores array, add them with 1 point if correct
-        if (!scoreUpdated && guess.toLowerCase() === correctAnswer.toLowerCase()) {
-            updatedScores.push({ playerId: user.uid, username: user.displayName, points: 1 });
+        // If the user does not have a score entry, add one
+        if (!userScoreUpdated) {
+          updatedScores.push({ playerId: user.uid, username: user.displayName, points: 1 });
         }
+      }
 
-        console.log("Updated scores:", updatedScores);
+      console.log("Updated scores:", updatedScores);
 
-        await setDoc(doc(firestore, 'games', lobbyId), { scores: updatedScores }, { merge: true });
-        dispatch(setScores(updatedScores));
+      await setDoc(doc(firestore, 'games', lobbyId), { scores: updatedScores }, { merge: true });
+      dispatch(setScores(updatedScores));
 
-        // Update members with new scores
-        const updatedMembers = members.map(member => {
-            const score = updatedScores.find(s => s.playerId === member.uid);
-            if (score) {
-                return { ...member, points: score.points };
-            }
-            return member;
+      // Update members with new scores
+      const updatedMembers = members.map(member => {
+        const score = updatedScores.find(s => s.playerId === member.uid);
+        if (score) {
+          return { ...member, points: score.points };
+        }
+        return member;
+      });
+
+      console.log("Updated members with new scores:", updatedMembers);
+
+      await updateDoc(doc(firestore, 'lobbies', lobbyId), { members: updatedMembers });
+      setMembers(updatedMembers);
+
+      if (currentRound < gameData.numRounds && gameData.currentSongIndex + 1 < gameData.songs.length) {
+        const newRound = currentRound + 1;
+        const newSongIndex = gameData.currentSongIndex + 1;
+
+        // 5-second break
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        await updateDoc(doc(firestore, 'games', lobbyId), {
+          currentRound: newRound,
+          timeLeft: gameData.timePerSong,
+          currentSongIndex: newSongIndex,
         });
-
-        console.log("Updated members with new scores:", updatedMembers);
-
-        await updateDoc(doc(firestore, 'lobbies', lobbyId), { members: updatedMembers });
-        setMembers(updatedMembers);
-
-        if (currentRound < gameData.numRounds && gameData.currentSongIndex + 1 < gameData.songs.length) {
-            const newRound = currentRound + 1;
-            const newSongIndex = gameData.currentSongIndex + 1;
-
-            // 5-second break
-            await new Promise(resolve => setTimeout(resolve, 5000));
-
-            await updateDoc(doc(firestore, 'games', lobbyId), {
-                currentRound: newRound,
-                timeLeft: gameData.timePerSong,
-                currentSongIndex: newSongIndex,
-            });
-            setCurrentRound(newRound);
-            setTimeLeft(gameData.timePerSong);
-        } else {
-            // Handle game end logic
-            await updateDoc(doc(firestore, 'games', lobbyId), { gameOver: true });
-            navigate(`/pregame/${lobbyId}`);
-        }
+        setCurrentRound(newRound);
+        setTimeLeft(gameData.timePerSong);
+      } else {
+        // Handle game end logic
+        await updateDoc(doc(firestore, 'games', lobbyId), { gameOver: true });
+        await updateDoc(doc(firestore, 'lobbies', lobbyId), { gameStarted: false });
+        navigate(`/pregame/${lobbyId}`);
+      }
     } catch (error) {
-        console.error("Error ending round or updating scores:", error);
+      console.error("Error ending round or updating scores:", error);
     }
-};
-
-
+  };
 
   const addCurrentUserToMembers = async () => {
     const userRef = doc(firestore, 'users', user.uid);
     const userSnap = await getDoc(userRef);
     const userData = userSnap.data();
 
-    // Ensure no duplicate members
-    const currentMembers = members.filter(member => member.uid !== user.uid);
-    const newMember = {
-      uid: user.uid,
-      username: userData.username,
-      points: 0, // Initialize points to 0
-    };
+    const lobbyRef = doc(firestore, 'lobbies', lobbyId);
+    const lobbySnap = await getDoc(lobbyRef);
+    const lobbyData = lobbySnap.data();
+    const existingMember = lobbyData.members.find(member => member.uid === user.uid);
 
-    await updateDoc(doc(firestore, 'lobbies', lobbyId), {
-      members: [...currentMembers, newMember]
-    });
-
-    await updateDoc(doc(firestore, 'games', lobbyId), {
-      members: arrayUnion({
+    if (!existingMember) {
+      const newMember = {
         uid: user.uid,
         username: userData.username,
-      }),
-    });
+        points: 0,
+      };
 
-    setMembers([...currentMembers, newMember]);
+      await updateDoc(lobbyRef, {
+        members: [...lobbyData.members, newMember]
+      });
+
+      await updateDoc(doc(firestore, 'games', lobbyId), {
+        members: [...lobbyData.members, newMember],
+      });
+
+      setMembers([...lobbyData.members, newMember]);
+    } else {
+      setMembers(lobbyData.members);
+    }
   };
 
   useEffect(() => {
