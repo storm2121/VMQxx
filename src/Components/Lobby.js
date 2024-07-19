@@ -36,7 +36,8 @@ const Lobby = () => {
             username: userData.username,
           }),
         });
-        dispatch(setCurrentLobby({ id: lobbyRef.id, name: lobbyName }));
+        const lobbyData = { id: lobbyRef.id, name: lobbyName, createdBy: auth.currentUser.uid, gameStarted: false };
+        dispatch(setCurrentLobby(lobbyData));
         navigate(`/pregame/${lobbyRef.id}`);
       } else {
         console.error('User is not authenticated');

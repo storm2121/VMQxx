@@ -90,7 +90,7 @@ const PreGameLobby = () => {
       if (currentLobby && songs.length > 0) {
         console.log('Current Lobby:', currentLobby);
         console.log('User ID:', user?.uid);
-        console.log('Lobby created by:', currentLobby.createdBy);
+        console.log('Lobby created by:', lobbyData.createdBy);
 
         await setDoc(doc(firestore, 'games', currentLobby.id), {
           numRounds: Math.min(numRounds, songs.length),
