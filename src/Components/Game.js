@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { doc, onSnapshot, getDoc, collection, getDocs, updateDoc } from 'firebase/firestore';
 import { firestore } from '../firebase';
 import { useDispatch, useSelector } from 'react-redux';
@@ -22,6 +22,7 @@ const Game = () => {
   const [songLink, setSongLink] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const [allSongs, setAllSongs] = useState([]);
+  const roundEndedRef = useRef(false); // useRef to hold round ended state
 
   useEffect(() => {
     if (lobbyId) {
@@ -47,6 +48,8 @@ const Game = () => {
               return member;
             });
           });
+
+          roundEndedRef.current = false; // Reset round ended state
         }
       });
 
@@ -81,7 +84,7 @@ const Game = () => {
 
   useEffect(() => {
     let timer;
-    if (timeLeft > 0) {
+    if (timeLeft > 0 && !roundEndedRef.current) {
       timer = setTimeout(() => {
         setTimeLeft(prevTimeLeft => {
           const newTimeLeft = prevTimeLeft - 1;
@@ -89,11 +92,11 @@ const Game = () => {
           return newTimeLeft;
         });
       }, 1000);
-    } else {
+    } else if (timeLeft === 0 && !roundEndedRef.current) {
       handleRoundEnd();
     }
     return () => clearTimeout(timer);
-  }, [timeLeft]);
+  }, [timeLeft, lobbyId, currentRound]); // Added currentRound dependency
 
   const handleGuessChange = (event, { newValue }) => {
     setGuess(newValue);
@@ -113,45 +116,56 @@ const Game = () => {
   };
 
   const handleRoundEnd = async () => {
+    if (roundEndedRef.current) return; // Prevent double execution
+    roundEndedRef.current = true; // Mark round as ended
+
     try {
       console.log("Fetching the correct answer...");
-  
+
       const songDoc = await getDoc(doc(firestore, 'songs', gameData.songs[gameData.currentSongIndex].id));
       const correctAnswer = songDoc.data().gameName;
-  
+
       console.log("Correct answer fetched:", correctAnswer);
       console.log("User's guess:", guess);
-  
+
       if (guess.toLowerCase() === correctAnswer.toLowerCase()) {
         console.log("Correct guess, updating score...");
         await updateScore(lobbyId, user.uid, 1);
       }
-  
+
+      // Delay to ensure score update is processed
+      await new Promise(resolve => setTimeout(resolve, 1000));
+
       // Fetch updated game data after score update
       const gameDoc = await getDoc(doc(firestore, 'games', lobbyId));
       const updatedGameData = gameDoc.data();
       const updatedScores = updatedGameData.scores || [];
-  
+
+      // Fetch members from the lobby document
+      const lobbyDoc = await getDoc(doc(firestore, 'lobbies', lobbyId));
+      const lobbyData = lobbyDoc.data();
+      const lobbyMembers = lobbyData.members || [];
+
       // Update members with new scores
-      const updatedMembers = members.map(member => {
+      const updatedMembers = lobbyMembers.map(member => {
         const score = updatedScores.find(s => s.playerId === member.uid);
         if (score) {
           return { ...member, points: score.points };
         }
-        return member;
+        return { ...member, points: 0 }; // Ensure the member has points set to 0 if no score found
       });
-  
+
       console.log("Updated members with new scores:", updatedMembers);
       await updateDoc(doc(firestore, 'lobbies', lobbyId), { members: updatedMembers });
       setMembers(updatedMembers);
-  
+
       if (currentRound < gameData.numRounds && gameData.currentSongIndex + 1 < gameData.songs.length) {
         const newRound = currentRound + 1;
         const newSongIndex = gameData.currentSongIndex + 1;
-  
+
         // 5-second break
         await new Promise(resolve => setTimeout(resolve, 5000));
-  
+
         await updateDoc(doc(firestore, 'games', lobbyId), {
           currentRound: newRound,
           timeLeft: gameData.timePerSong,
@@ -159,6 +173,7 @@ const Game = () => {
         });
         setCurrentRound(newRound);
         setTimeLeft(gameData.timePerSong);
+        roundEndedRef.current = false; // Reset round ended state for the new round
       } else {
         // Handle game end logic
         await updateDoc(doc(firestore, 'games', lobbyId), { gameOver: true });
@@ -169,6 +184,7 @@ const Game = () => {
       console.error("Error ending round or updating scores:", error);
     }
   };
+
   
   const addCurrentUserToMembers = async () => {
     const userRef = doc(firestore, 'users', user.uid);

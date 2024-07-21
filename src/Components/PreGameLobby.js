@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { collection, getDocs, doc, setDoc, onSnapshot, updateDoc, getDoc, arrayUnion } from 'firebase/firestore';
+import { collection, getDocs, doc, setDoc, onSnapshot, updateDoc, getDoc, arrayUnion, deleteDoc } from 'firebase/firestore';
 import { firestore } from '../firebase';
 import { useSelector } from 'react-redux';
 
@@ -19,6 +19,11 @@ const PreGameLobby = () => {
     if (lobbyId) {
       console.log("Entering pregame with lobby ID:", lobbyId);
       const unsubscribe = onSnapshot(doc(firestore, 'lobbies', lobbyId), snapshot => {
+        if (!snapshot.exists()) {
+          // If the lobby document no longer exists, navigate to the main lobby
+          navigate('/lobby');
+          return;
+        }
         const data = snapshot.data();
         if (data) {
           console.log('Fetched lobby data:', data);
@@ -31,10 +36,11 @@ const PreGameLobby = () => {
           }
         }
       });
-
+  
       return () => unsubscribe();
     }
   }, [lobbyId]);
+  
 
   useEffect(() => {
     const fetchSongs = async () => {
@@ -117,6 +123,42 @@ const PreGameLobby = () => {
     }
   };
 
+  const handleQuit = async () => {
+    try {
+      const lobbyRef = doc(firestore, 'lobbies', lobbyId);
+
+      // Remove the user from the members array
+      const newMembers = members.filter(member => member.uid !== user.uid);
+      await updateDoc(lobbyRef, { members: newMembers });
+
+      // If the lobby is empty, delete it
+      if (newMembers.length === 0) {
+        await deleteDoc(lobbyRef);
+      } else if (lobbyData.createdBy === user.uid) {
+        // If the user was the creator, transfer ownership to another member
+        const newCreator = newMembers[Math.floor(Math.random() * newMembers.length)];
+        await updateDoc(lobbyRef, { createdBy: newCreator.uid });
+      }
+
+      navigate('/lobby');
+    } catch (error) {
+      console.error('Error quitting the lobby:', error);
+    }
+  };
+
+  const handleClose = async () => {
+    try {
+      const lobbyRef = doc(firestore, 'lobbies', lobbyId);
+
+      // Delete the lobby
+      await deleteDoc(lobbyRef);
+
+      navigate('/lobby');
+    } catch (error) {
+      console.error('Error closing the lobby:', error);
+    }
+  };
+
   return (
     <div>
       <h2>Pre-Game Lobby</h2>
@@ -148,6 +190,10 @@ const PreGameLobby = () => {
           <li key={member.uid}>{member.username}</li>
         ))}
       </ul>
+      <button onClick={handleQuit}>Quit</button>
+      {lobbyData && user && lobbyData.createdBy === user.uid && (
+        <button onClick={handleClose}>Close Lobby</button>
+      )}
     </div>
   );
 };

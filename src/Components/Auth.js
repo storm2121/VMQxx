@@ -3,6 +3,7 @@ import { useDispatch } from 'react-redux';
 import { signInWithEmailAndPassword, createUserWithEmailAndPassword, updateProfile } from 'firebase/auth';
 import { auth } from '../firebase';
 import { setUser } from '../redux/authSlice';
+import { getFirestore, doc, setDoc } from 'firebase/firestore';
 
 const Auth = () => {
   const dispatch = useDispatch();
@@ -10,6 +11,7 @@ const Auth = () => {
   const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [isRegistering, setIsRegistering] = useState(false);
+  const firestore = getFirestore();
 
   const handleAuth = async (e) => {
     e.preventDefault();
@@ -19,6 +21,12 @@ const Auth = () => {
       try {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         await updateProfile(userCredential.user, { displayName: username });
+
+        // Add user to Firestore
+        await setDoc(doc(firestore, 'users', userCredential.user.uid), {
+          email: userCredential.user.email,
+          username: username,
+        });
 
         dispatch(setUser({
           uid: userCredential.user.uid,
